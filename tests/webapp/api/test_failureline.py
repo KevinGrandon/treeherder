@@ -138,7 +138,7 @@ def test_update_failure_line_mark_job(eleven_jobs_stored,
         assert failure_line.best_classification == classified_failures[1]
         assert failure_line.best_is_verified
 
-    assert jm.fully_autoclassified(job['id'])
+    assert jm.fully_verified(job['id'])
 
     notes = jm.get_job_note_list(job['id'])
 
@@ -187,7 +187,7 @@ def test_update_failure_line_mark_job_with_human_note(eleven_jobs_stored,
 
         assert resp.status_code == 200
 
-    assert jm.fully_autoclassified(job['id'])
+    assert jm.fully_verified(job['id'])
 
     notes = jm.get_job_note_list(job['id'])
 
@@ -236,7 +236,7 @@ def test_update_failure_line_mark_job_with_auto_note(eleven_jobs_stored,
 
         assert resp.status_code == 200
 
-    assert jm.fully_autoclassified(job['id'])
+    assert jm.fully_verified(job['id'])
 
     notes = jm.get_job_note_list(job['id'])
 
@@ -297,7 +297,7 @@ def test_update_failure_lines(eleven_jobs_stored,
         assert failure_line.best_is_verified
 
     for job in jobs:
-        assert jm.fully_autoclassified(job['id'])
+        assert jm.fully_verified(job['id'])
 
         notes = jm.get_job_note_list(job['id'])
 
@@ -305,3 +305,142 @@ def test_update_failure_lines(eleven_jobs_stored,
 
         assert notes[0]["failure_classification_id"] == 4
         assert notes[0]["who"] == "test@example.org"
+
+
+def test_update_failure_line_ignore(eleven_jobs_stored, jm, failure_lines,
+                                    classified_failures, api_user):
+
+    client = APIClient()
+    user = User.objects.create(username="MyName")
+    client.force_authenticate(user=user)
+
+    failure_line = failure_lines[0]
+    assert failure_line.best_classification == classified_failures[0]
+    assert failure_line.best_is_verified is False
+
+    body = {"project": jm.project,
+            "best_classification": None}
+
+    resp = client.put(
+        reverse("failure-line-detail", kwargs={"pk": failure_line.id}),
+        body, format="json")
+
+    assert resp.status_code == 200
+
+    failure_line.refresh_from_db()
+
+    assert failure_line.best_classification is None
+    assert failure_line.best_is_verified
+
+
+def test_update_failure_line_all_ignore_mark_job(eleven_jobs_stored,
+                                                 mock_autoclassify_jobs_true, jm,
+                                                 failure_lines,
+                                                 classified_failures, api_user):
+
+    MatcherManager.register_detector(ManualDetector)
+
+    client = APIClient()
+    user = User.objects.create(username="MyName",
+                               email="test@example.org")
+    client.force_authenticate(user=user)
+
+    job = jm.get_job(1)[0]
+
+    job_failure_lines = [line for line in failure_lines if
+                         line.job_guid == job["job_guid"]]
+
+    for failure_line in job_failure_lines:
+        failure_line.best_is_verified = False
+        failure_line.best_classification = None
+
+    bs_artifact = {'type': 'json',
+                   'name': 'Bug suggestions',
+                   'blob': json.dumps([{"search": "TEST-UNEXPECTED-%s %s" %
+                                        (line.status.upper(), line.message)}
+                                       for line in job_failure_lines]),
+                   'job_guid': job['job_guid']}
+
+    with ArtifactsModel(jm.project) as artifacts_model:
+        artifacts_model.load_job_artifacts([bs_artifact],
+                                           {bs_artifact['job_guid']: job})
+
+    assert len(jm.get_job_note_list(job['id'])) == 0
+
+    for failure_line in job_failure_lines:
+
+        assert failure_line.best_is_verified is False
+
+        body = {"best_classification": None}
+
+        resp = client.put(reverse("failure-line-detail", kwargs={"pk": failure_line.id}),
+                          body, format="json")
+
+        assert resp.status_code == 200
+
+        failure_line.refresh_from_db()
+
+        assert failure_line.best_classification is None
+        assert failure_line.best_is_verified
+
+    assert jm.fully_verified(job['id'])
+
+    notes = jm.get_job_note_list(job['id'])
+
+    assert len(notes) == 1
+
+
+def test_update_failure_line_partial_ignore_mark_job(eleven_jobs_stored,
+                                                     mock_autoclassify_jobs_true, jm,
+                                                     failure_lines,
+                                                     classified_failures, api_user):
+
+    MatcherManager.register_detector(ManualDetector)
+
+    client = APIClient()
+    user = User.objects.create(username="MyName",
+                               email="test@example.org")
+    client.force_authenticate(user=user)
+
+    job = jm.get_job(1)[0]
+
+    job_failure_lines = [line for line in failure_lines if
+                         line.job_guid == job["job_guid"]]
+
+    bs_artifact = {'type': 'json',
+                   'name': 'Bug suggestions',
+                   'blob': json.dumps([{"search": "TEST-UNEXPECTED-%s %s" %
+                                        (line.status.upper(), line.message)}
+                                       for line in job_failure_lines]),
+                   'job_guid': job['job_guid']}
+
+    with ArtifactsModel(jm.project) as artifacts_model:
+        artifacts_model.load_job_artifacts([bs_artifact],
+                                           {bs_artifact['job_guid']: job})
+
+    for i, failure_line in enumerate(job_failure_lines):
+
+        assert failure_line.best_is_verified is False
+
+        body = {"best_classification": None if i == 0 else classified_failures[0].id}
+
+        resp = client.put(reverse("failure-line-detail", kwargs={"pk": failure_line.id}),
+                          body, format="json")
+
+        assert resp.status_code == 200
+
+        failure_line.refresh_from_db()
+
+        if i == 0:
+            assert failure_line.best_classification is None
+        else:
+            assert failure_line.best_classification == classified_failures[0]
+        assert failure_line.best_is_verified
+
+    assert jm.fully_verified(job['id'])
+
+    notes = jm.get_job_note_list(job['id'])
+
+    assert len(notes) == 1
+    assert notes[0]["failure_classification_id"] == 4
+    assert notes[0]["who"] == "test@example.org"

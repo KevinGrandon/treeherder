@@ -44,11 +44,13 @@ class FailureLineViewSet(viewsets.ViewSet):
 
             failure_line_ids.add(line_id)
 
-            classification_id = item.get("best_classification")
-            if not classification_id:
+            if "best_classification" not in item:
                 return "No classification id provided", 400
 
-            classification_ids.add(classification_id)
+            classification_id = item.get("best_classification")
+
+            if classification_id is not None:
+                classification_ids.add(classification_id)
 
             ids.append((line_id, classification_id))
 
@@ -69,7 +71,10 @@ class FailureLineViewSet(viewsets.ViewSet):
 
         for line_id, classification_id in ids:
             failure_line = failure_lines[line_id]
-            classification = classifications[classification_id]
+            if classification_id is not None:
+                classification = classifications[classification_id]
+            else:
+                classification = None
 
             by_project[failure_line.repository.name].append(failure_line.job_guid)
 
@@ -77,7 +82,8 @@ class FailureLineViewSet(viewsets.ViewSet):
             failure_line.best_is_verified = True
             failure_line.save()
 
-            if classification not in failure_line.classified_failures.all():
+            if (classification is not None and
+                classification not in failure_line.classified_failures.all()):
                 manual_detector = Matcher.objects.get(name="ManualDetector")
                 match = FailureMatch(failure_line=failure_line,
                                      classified_failure=classification,
@@ -89,7 +95,7 @@ class FailureLineViewSet(viewsets.ViewSet):
             with JobsModel(project) as jm:
                 jobs = jm.get_job_ids_by_guid(job_guids)
                 for job in jobs.values():
-                    jm.update_after_autoclassification(job["id"], email)
+                    jm.update_after_verification(job["id"], email)
 
         # Force failure line to be reloaded, including .classified_failures
         rv = FailureLine.objects.prefetch_related('classified_failures').filter(

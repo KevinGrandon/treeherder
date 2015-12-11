@@ -190,3 +190,28 @@ def test_autoclassified_no_update_after_manual_classification_2(activate_respons
         item.refresh_from_db()
 
     assert len(test_failure_lines[0].matches.all()) == 0
+
+def test_classify_skip_ignore(activate_responses, jm, test_project, test_repository,
+                              eleven_jobs_stored, initial_data, failure_lines,
+                              classified_failures):
+    job = jm.get_job(2)[0]
+
+    failure_lines[1].best_is_verified = True
+    failure_lines[1].best_classification = None
+    failure_lines[1].save()
+
+    test_failure_lines = create_failure_lines(test_repository,
+                                              job["job_guid"],
+                                              [(test_line, {}),
+                                               (test_line, {"subtest": "subtest2"})])
+
+    autoclassify(jm, job, test_failure_lines)
+
+    expected_classified = test_failure_lines[:1]
+    expected_unclassified = test_failure_lines[1:]
+
+    for actual, expected in zip(expected_classified, classified_failures):
+        assert [item.id for item in actual.classified_failures.all()] == [expected.id]
+
+    for item in expected_unclassified:
+        assert item.classified_failures.count() == 0

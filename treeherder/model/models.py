@@ -585,6 +585,9 @@ class FailureLine(models.Model):
     stackwalk_stdout = models.TextField(blank=True, null=True)
     stackwalk_stderr = models.TextField(blank=True, null=True)
 
+    # Note that the case of best_classification = None and best_is_verified = True
+    # has the special semantic that the line is ignored and should not be considered
+    # for future autoclassifications.
     best_classification = FlexibleForeignKey("ClassifiedFailure",
                                              related_name="best_for_lines",
                                              null=True)
@@ -670,6 +673,8 @@ class ClassifiedFailure(models.Model):
     id = BigAutoField(primary_key=True)
     failure_lines = models.ManyToManyField(FailureLine, through='FailureMatch',
                                            related_name='classified_failures')
+    # Note that we use a bug number of 0 as a sentinal value to indicate lines that
+    # are not actually symptomatic of a real bug, but are still possible to autoclassify
     bug_number = models.PositiveIntegerField(blank=True, null=True)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)

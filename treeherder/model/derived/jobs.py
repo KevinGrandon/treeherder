@@ -488,16 +488,50 @@ class JobsModel(TreeherderModelBase):
 
         if self.fully_autoclassified(job_id):
             existing_notes = self.get_job_note_list(job_id)
+            # We don't want to add a job note after an autoclassification if there is already
+            # one and after a verification if there is already one not supplied by the
+            # autoclassifier
+            if existing_notes:
+                return
+            self.insert_autoclassify_job_note(job_id)
+
+    def update_after_verification(self, job_id, user):
+        if not settings.AUTOCLASSIFY_JOBS:
+            return
+
+        if self.fully_verified(job_id):
+            existing_notes = self.get_job_note_list(job_id)
             autoclassification = FailureClassification.objects.get(
                 name="autoclassified intermittent")
             # We don't want to add a job note after an autoclassification if there is already
             # one and after a verification if there is already one not supplied by the
             # autoclassifier
-            if (user == "autoclassifier" and existing_notes or
-                any(item["failure_classification_id"] != autoclassification.id
+            if (any(item["failure_classification_id"] != autoclassification.id
                     for item in existing_notes)):
                 return
             self.insert_autoclassify_job_note(job_id, user=user)
+
+    def fully_verified(self, job_id):
+        job = self.get_job(job_id)[0]
+
+        if FailureLine.objects.filter(job_guid=job["job_guid"],
+                                      action="truncated").count() > 0:
+            return False
+
+        unverified_failure_lines = FailureLine.objects.filter(
+            best_is_verified=False,
+            job_guid=job["job_guid"]).count()
+
+        if unverified_failure_lines:
+            return False
+
+        verified_failure_lines = FailureLine.objects.filter(
+            best_is_verified=True,
+            job_guid=job["job_guid"]).count()
+
+        bug_suggestion_lines = self.filter_bug_suggestions(self.bug_suggestions(job_id))
+
+        return verified_failure_lines == len(bug_suggestion_lines)
 
     def fully_autoclassified(self, job_id):
         job = self.get_job(job_id)[0]
@@ -506,14 +540,16 @@ class JobsModel(TreeherderModelBase):
                                       action="truncated").count() > 0:
             return False
 
-        num_failure_lines = FailureLine.objects.filter(job_guid=job["job_guid"],
-                                                       best_classification__isnull=False).count()
-        if num_failure_lines == 0:
+        classified_failure_lines = FailureLine.objects.filter(
+            best_classification__isnull=False,
+            job_guid=job["job_guid"]).count()
+
+        if classified_failure_lines == 0:
             return False
 
         bug_suggestion_lines = self.filter_bug_suggestions(self.bug_suggestions(job_id))
 
-        return num_failure_lines == len(bug_suggestion_lines)
+        return classified_failure_lines == len(bug_suggestion_lines)
 
     def insert_autoclassify_job_note(self, job_id, user=None):
         if not settings.AUTOCLASSIFY_JOBS:
